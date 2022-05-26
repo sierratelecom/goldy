@@ -31,6 +31,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
@@ -73,7 +74,8 @@ static void print_usage() {
      "  -l, --listen=ADDR:PORT     listen for incoming DTLS on addr and UDP port\n"
      "  -b, --backend=ADDR:PORT    proxy UDP traffic to addr and port\n"
      "  -c, --cert=FILE            TLS certificate PEM filename\n"
-     "  -k, --key=FILE             TLS private key PEM filename\n");
+     "  -k, --key=FILE             TLS private key PEM filename\n"
+     "  -r, --root_ca=FILE         TLS root certificate PEM filename (for verifying client using mutual TLS)\n");
 }
 
 /** Parse command line arguments.
@@ -85,7 +87,7 @@ static int get_options(int argc, char **argv, struct instance *gi) {
 
   char *sep;
 
-  static const char *short_options = "hvdb:g:l:c:k:t:";
+  static const char *short_options = "hvdb:g:l:c:k:t:r:";
 
   static struct option long_options[] = {
     {"help", no_argument, NULL, 'h'},
@@ -96,6 +98,7 @@ static int get_options(int argc, char **argv, struct instance *gi) {
     {"listen", required_argument, NULL, 'l'},
     {"cert", required_argument, NULL, 'c'},
     {"key", required_argument, NULL, 'k'},
+    {"root_ca", optional_argument, NULL, 'r'},
     {"timeout", optional_argument, NULL, 't'},
     {0, 0, 0, 0}
   };
@@ -150,6 +153,9 @@ static int get_options(int argc, char **argv, struct instance *gi) {
     case 'k':                /* -k, --key=S */
       gi->private_key_file = optarg;
       break;
+  case 'r':                  /* -r, --root_ca=S */
+      gi->root_ca_file = optarg;
+      break;
     case 't':                /* -t, --timeout=I */
       gi->session_timeout = atoi(optarg);
       break;
@@ -181,12 +187,14 @@ static int check_return_code(int ret, const char *label) {
 
 typedef struct {
   const struct instance *options;
+  bool use_cacert;
   mbedtls_ssl_cookie_ctx cookie_ctx;
   mbedtls_net_context listen_fd;
   mbedtls_entropy_context entropy;
   mbedtls_ctr_drbg_context ctr_drbg;
   mbedtls_ssl_config conf;
   mbedtls_x509_crt srvcert;
+  mbedtls_x509_crt cacert;
   mbedtls_pk_context pkey;
 #if defined(MBEDTLS_SSL_CACHE_C)
   mbedtls_ssl_cache_context cache;
@@ -201,6 +209,7 @@ static int global_deinit(global_context *gc) {
   mbedtls_net_free(&gc->listen_fd);
 
   mbedtls_x509_crt_free(&gc->srvcert);
+  mbedtls_x509_crt_free(&gc->cacert);
   mbedtls_pk_free(&gc->pkey);
   mbedtls_ssl_config_free(&gc->conf);
   mbedtls_ssl_cookie_free(&gc->cookie_ctx);
@@ -250,6 +259,7 @@ static int global_init(const struct instance *gi, global_context *gc) {
   mbedtls_ssl_cache_init(&gc->cache);
 #endif
   mbedtls_x509_crt_init(&gc->srvcert);
+  mbedtls_x509_crt_init(&gc->cacert);
   mbedtls_pk_init(&gc->pkey);
   mbedtls_entropy_init(&gc->entropy);
   mbedtls_ctr_drbg_init(&gc->ctr_drbg);
@@ -266,6 +276,17 @@ static int global_init(const struct instance *gi, global_context *gc) {
     goto exit;
   }
 #endif
+
+  if (gi->root_ca_file != NULL)
+  {
+      gc->use_cacert = true;
+      ret = mbedtls_x509_crt_parse_file(&gc->cacert, gi->root_ca_file);
+      if (ret != 0) {
+          log_error("mbedtls_x509_crt_parse returned %d", ret);
+          goto exit;
+      }
+      log_debug("Loaded root certificate file");
+  }
 
   ret = mbedtls_x509_crt_parse_file(&gc->srvcert, gi->cert_file);
   if (ret != 0) {
@@ -297,6 +318,9 @@ static int global_init(const struct instance *gi, global_context *gc) {
     goto exit;
   }
 
+  if (gc->use_cacert) {
+      mbedtls_ssl_conf_authmode(&gc->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+  }
   mbedtls_ssl_conf_dbg(&gc->conf, log_mbedtls_debug_callback, NULL);
   mbedtls_debug_set_threshold(MBEDTLS_DEBUG_LOGGING_LEVEL);
   mbedtls_ssl_conf_rng(&gc->conf, mbedtls_ctr_drbg_random, &gc->ctr_drbg);
@@ -307,7 +331,10 @@ static int global_init(const struct instance *gi, global_context *gc) {
                                  mbedtls_ssl_cache_set);
 #endif
 
-  mbedtls_ssl_conf_ca_chain(&gc->conf, gc->srvcert.next, NULL);
+  if (gc->use_cacert) {
+    mbedtls_ssl_conf_ca_chain(&gc->conf, &gc->cacert, NULL);
+  }
+
   if ((ret = mbedtls_ssl_conf_own_cert(&gc->conf, &gc->srvcert, &gc->pkey)) != 0) {
     log_error("mbedtls_ssl_conf_own_cert returned %d", ret);
     goto exit;
