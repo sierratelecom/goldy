@@ -20,4 +20,4 @@ if [ -n "$BACKEND" ]; then
     GOLDY_ARGS="$GOLDY_ARGS -b $BACKEND"
 fi
 
-/usr/local/bin/goldy $GOLDY_ARGS $*
+/usr/local/bin/goldy $GOLDY_ARGS -t 1000 $*
