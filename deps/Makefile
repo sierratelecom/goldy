@@ -16,10 +16,10 @@ build_deps: build_mbedtls build_libev
 
 download_mbedtls:
 	@echo "Downloading mbedtls-$(MBEDTLS_VER) ..."
-	@curl --fail -O https://tls.mbed.org/download/mbedtls-$(MBEDTLS_VER)-apache.tgz || \
+	@curl --fail -o mbedtls-$(MBEDTLS_VER).tgz https://codeload.github.com/Mbed-TLS/mbedtls/tar.gz/refs/tags/v$(MBEDTLS_VER) || \
 		(echo "Error downloading mbedtls: Check the MBEDTLS_VER in deps/versions.mk and current version in https://tls.mbed.org/download" ; exit 1)
-	tar xzf mbedtls-$(MBEDTLS_VER)-apache.tgz
-	rm -f mbedtls-$(MBEDTLS_VER)-apache.tgz
+	tar xzf mbedtls-$(MBEDTLS_VER).tgz
+	rm -f mbedtls-$(MBEDTLS_VER).tgz
 
 .PHONY: download_mbedtls
 
