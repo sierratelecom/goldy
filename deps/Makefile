@@ -6,22 +6,22 @@ endif
 
 all: download_deps build_deps
 
-download_deps: download_libev
+download_deps: download_mbedtls download_libev
 
 .PHONY: download_deps
 
 build_deps: build_mbedtls build_libev
 
-# .PHONY: build_deps
+.PHONY: build_deps
 
-# download_mbedtls:
-#   @echo "Downloading mbedtls-$(MBEDTLS_VER) ..."
-#   @curl --fail -O https://tls.mbed.org/download/mbedtls-$(MBEDTLS_VER)-apache.tgz || \
-        (echo "Error downloading mbedtls: Check the MBEDTLS_VER in deps/versions.mk and current version in https://tls.mbed.org/download" ; exit 1)
-#   tar xzf mbedtls-$(MBEDTLS_VER)-apache.tgz
-#   rm -f mbedtls-$(MBEDTLS_VER)-apache.tgz
+download_mbedtls:
+	@echo "Downloading mbedtls-$(MBEDTLS_VER) ..."
+	@curl --fail -o mbedtls-$(MBEDTLS_VER).tgz https://codeload.github.com/Mbed-TLS/mbedtls/tar.gz/refs/tags/v$(MBEDTLS_VER) || \
+		(echo "Error downloading mbedtls: Check the MBEDTLS_VER in deps/versions.mk and current version in https://tls.mbed.org/download" ; exit 1)
+	tar xzf mbedtls-$(MBEDTLS_VER).tgz
+	rm -f mbedtls-$(MBEDTLS_VER).tgz
 
-# .PHONY: download_mbedtls
+.PHONY: download_mbedtls
 
 build_mbedtls:
 	$(MAKE) -C mbedtls-$(MBEDTLS_VER) lib
