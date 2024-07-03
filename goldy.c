@@ -6,7 +6,11 @@
 #define _XOPEN_SOURCE 700
 #endif
 
+#if !defined(MBEDTLS_CONFIG_FILE)
 #include "mbedtls/config.h"
+#else
+#include MBEDTLS_CONFIG_FILE
+#endif
 #include "mbedtls/platform.h"
 
 #include "mbedtls/entropy.h"
@@ -350,6 +354,11 @@ static int global_init(const struct instance *gi, global_context *gc) {
   log_info("Proxy is ready, listening for connections on UDP %s:%s",
            gi->listen_host, gi->listen_port);
 
+  if ((ret = mbedtls_ssl_conf_cid(&gc->conf, sizeof(uint8_t *), true)) != 0) {
+      log_error("mbedtls_ssl_conf_cid returned %d", ret);
+      goto exit;
+  }
+
  exit:
   check_return_code(ret, "global_init - exit");
 
@@ -425,6 +434,13 @@ static int session_init(const global_context *gc,
   mbedtls_ssl_set_timer_cb(&sc->ssl, &sc->timer,
                            mbedtls_timing_set_delay,
                            mbedtls_timing_get_delay);
+
+  if( ( ret = mbedtls_ssl_set_cid(&sc->ssl, MBEDTLS_SSL_CID_ENABLED,
+                                  (uint8_t*)sc, sizeof(uint8_t *) ) ) != 0 )
+  {
+      check_return_code(ret, "session_init - mbedtls_ssl_set_cid");
+      return 1;
+  }
 
   /* We already read the first packet of the SSL session from the network in
    * the initial recvfrom() call on the listening fd. Here we copy the content
