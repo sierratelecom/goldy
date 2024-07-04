@@ -46,6 +46,8 @@
 #include "log.h"
 #include "utlist.h"
 
+#define CID_LENGTH (sizeof(uint8_t *))
+
 /* Raise this value to have more verbose logging from mbedtls functions */
 #define MBEDTLS_DEBUG_LOGGING_LEVEL 0
 
@@ -354,7 +356,7 @@ static int global_init(const struct instance *gi, global_context *gc) {
   log_info("Proxy is ready, listening for connections on UDP %s:%s",
            gi->listen_host, gi->listen_port);
 
-  if ((ret = mbedtls_ssl_conf_cid(&gc->conf, sizeof(uint8_t *), true)) != 0) {
+  if ((ret = mbedtls_ssl_conf_cid(&gc->conf, CID_LENGTH, true)) != 0) {
       log_error("mbedtls_ssl_conf_cid returned %d", ret);
       goto exit;
   }
@@ -436,7 +438,7 @@ static int session_init(const global_context *gc,
                            mbedtls_timing_get_delay);
 
   if( ( ret = mbedtls_ssl_set_cid(&sc->ssl, MBEDTLS_SSL_CID_ENABLED,
-                                  (uint8_t*)sc, sizeof(uint8_t *) ) ) != 0 )
+                                  (uint8_t*)sc, CID_LENGTH ) ) != 0 )
   {
       check_return_code(ret, "session_init - mbedtls_ssl_set_cid");
       return 1;
@@ -905,6 +907,24 @@ static int connect_to_new_client(mbedtls_net_context* client_fd,
   return 0;
 }
 
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+static session_context *get_session_for_cid(const unsigned char *packet)
+{
+    //TODO: if the packet contains CID, need to find session that was already created
+    const uint8_t *cid;
+    session_context *sc;
+
+    cid = &packet[11];
+    log_debug("CID: %02x %02x %02x %02x %02x %02x %02x %02x",
+              cid[0], cid[1], cid[2], cid[3], cid[4], cid[5], cid[6], cid[7]);
+
+    memcpy(&sc, cid, CID_LENGTH);
+    log_debug("sc=%p", sc);
+
+    return NULL;
+}
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
+
 static void global_cb(EV_P_ ev_io *w, int revents) {
   global_context *gc = (global_context *)w->data;
   static int count = 0;
@@ -924,7 +944,7 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
   /* Read all the incoming packets waiting on listen_fd, and create a session for each one */
   for (;;) {
     mbedtls_net_context client_fd;
-    session_context *sc;
+    session_context *sc = NULL;
     struct sockaddr_storage client_addr;
     socklen_t client_addr_size = sizeof(client_addr);
     unsigned char first_packet[MBEDTLS_SSL_MAX_CONTENT_LEN];
@@ -948,6 +968,19 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
 
     first_packet_len = ret;
 
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+    if ((first_packet_len >= (11 + CID_LENGTH)) &&
+        (first_packet[0] == MBEDTLS_SSL_MSG_CID))
+    {
+        sc = get_session_for_cid(first_packet);
+        if (sc == NULL)
+        {
+            log_debug("Received message with CID but it's not found");
+            continue;
+        }
+    }
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
+
     /* We have a new client! Connect the client_fd socket to that peer */
     ret = connect_to_new_client(&client_fd,
                                 &client_addr, client_addr_size,
@@ -956,6 +989,21 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
       log_error("connect_to_new_client failed");
       continue;
     }
+
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+    if (sc != NULL)
+    {
+        log_debug("Found session with same CID, use it");
+        //TODO: remove previous fd from ev
+        mbedtls_net_free(&sc->client_fd);
+        memcpy(&sc->client_fd, &client_fd, sizeof(client_fd));
+        acquire_peername(sc);
+        log_info("(%s:%d) Client connected from different IP/port", sc->client_ip_str, sc->client_port);
+
+        //TODO: notify ev to listen for new socket
+        continue;
+    }
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
     sc = calloc(1, sizeof(session_context));
 
