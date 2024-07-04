@@ -31,6 +31,7 @@
 
 #include "ev.h"
 
+#include <search.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
@@ -40,13 +41,14 @@
 #include <sys/types.h>
 #include <arpa/inet.h>
 #include <getopt.h>
+#include <inttypes.h>
 
 #include "goldy.h"
 #include "daemonize.h"
 #include "log.h"
 #include "utlist.h"
 
-#define CID_LENGTH (sizeof(uint8_t *))
+#define CID_LENGTH (sizeof(cid_t))
 
 /* Raise this value to have more verbose logging from mbedtls functions */
 #define MBEDTLS_DEBUG_LOGGING_LEVEL 0
@@ -61,6 +63,11 @@
       free(_tmp);                      \
     }                                  \
   } while (0)
+
+typedef uint32_t cid_t;
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+static void *root = NULL;
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
 static void print_version() {
   printf("goldy %s\n", GOLDY_VERSION);
@@ -257,6 +264,7 @@ static int global_init(const struct instance *gi, global_context *gc) {
 #endif
   const char *pers = "goldy";
 
+  srand(time(NULL));
   memset(gc, 0, sizeof(*gc));
   gc->options = gi;
   mbedtls_ssl_config_init(&gc->conf);
@@ -356,10 +364,12 @@ static int global_init(const struct instance *gi, global_context *gc) {
   log_info("Proxy is ready, listening for connections on UDP %s:%s",
            gi->listen_host, gi->listen_port);
 
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
   if ((ret = mbedtls_ssl_conf_cid(&gc->conf, CID_LENGTH, true)) != 0) {
       log_error("mbedtls_ssl_conf_cid returned %d", ret);
       goto exit;
   }
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
  exit:
   check_return_code(ret, "global_init - exit");
@@ -385,7 +395,10 @@ typedef enum {
   GOLDY_SESSION_STEP_LAST,
 } session_step;
 
-typedef struct {
+typedef struct session_context {
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+  cid_t cid;
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
   const struct instance *options;
   mbedtls_net_context client_fd;
   mbedtls_net_context backend_fd;
@@ -407,6 +420,36 @@ typedef struct {
   int pending_free;
 } session_context;
 
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+static int compare(const void *pa, const void *pb)
+{
+    const session_context *a = pa;
+    const session_context *b = pb;
+
+    if (a->cid < b->cid)
+        return -1;
+    if (a->cid > b->cid)
+        return 1;
+    return 0;
+}
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
+
+static session_context* allocate_session(void)
+{
+    session_context* sc = malloc(sizeof(session_context));
+    if (sc != NULL) memset(sc, 0, sizeof(session_context));
+    return sc;
+}
+
+static void free_session(session_context* sc)
+{
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+    tdelete(sc, &root, compare);
+#endif
+    free(sc);
+}
+
+
 static void session_dispatch(EV_P_ ev_io *w, int revents);
 
 static int session_init(const global_context *gc,
@@ -416,7 +459,7 @@ static int session_init(const global_context *gc,
                         const unsigned char* first_packet, size_t first_packet_len) {
   int ret;
 
-  memset(sc, 0, sizeof(*sc));
+  //memset(sc, 0, sizeof(*sc));
   memcpy(&sc->client_fd, client_fd, sizeof(sc->client_fd));
   if (cliip_len > sizeof(sc->client_ip)) {
     log_error("session_init - client_ip size mismatch");
@@ -437,12 +480,14 @@ static int session_init(const global_context *gc,
                            mbedtls_timing_set_delay,
                            mbedtls_timing_get_delay);
 
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
   if( ( ret = mbedtls_ssl_set_cid(&sc->ssl, MBEDTLS_SSL_CID_ENABLED,
-                                  (uint8_t*)sc, CID_LENGTH ) ) != 0 )
+                                  (unsigned char*)&sc->cid, CID_LENGTH ) ) != 0 )
   {
       check_return_code(ret, "session_init - mbedtls_ssl_set_cid");
       return 1;
   }
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
   /* We already read the first packet of the SSL session from the network in
    * the initial recvfrom() call on the listening fd. Here we copy the content
@@ -472,7 +517,7 @@ static void session_free(EV_P_ session_context *sc) {
   LL_PURGE(sc->from_backend);
 
   log_info("(%s:%d) Session closed", sc->client_ip_str, sc->client_port);
-  free(sc);
+  free_session(sc);
 }
 
 static void session_mark_activity(EV_P_ session_context *sc) {
@@ -910,18 +955,15 @@ static int connect_to_new_client(mbedtls_net_context* client_fd,
 #ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
 static session_context *get_session_for_cid(const unsigned char *packet)
 {
-    //TODO: if the packet contains CID, need to find session that was already created
-    const uint8_t *cid;
-    session_context *sc;
+    const uint8_t *p;
+    session_context sc;
 
-    cid = &packet[11];
-    log_debug("CID: %02x %02x %02x %02x %02x %02x %02x %02x",
-              cid[0], cid[1], cid[2], cid[3], cid[4], cid[5], cid[6], cid[7]);
+    p = &packet[11];
 
-    memcpy(&sc, cid, CID_LENGTH);
-    log_debug("sc=%p", sc);
+    memcpy(&sc.cid, p, CID_LENGTH);
+    log_debug("Find session for cid=0x%08"PRIx32, sc.cid);
 
-    return NULL;
+    return tfind(&sc, &root, compare);
 }
 #endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
@@ -945,6 +987,9 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
   for (;;) {
     mbedtls_net_context client_fd;
     session_context *sc = NULL;
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+    void *val = NULL;
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
     struct sockaddr_storage client_addr;
     socklen_t client_addr_size = sizeof(client_addr);
     unsigned char first_packet[MBEDTLS_SSL_MAX_CONTENT_LEN];
@@ -1005,14 +1050,46 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
     }
 #endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
-    sc = calloc(1, sizeof(session_context));
+    sc = allocate_session();
+    if (sc == NULL) {
+        log_error("Unable to allocate session");
+        continue;
+    }
 
-    session_init(gc, sc, &client_fd, (unsigned char *)&client_addr, client_addr_size,
-                 first_packet, first_packet_len);
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+    for (int i = 0; i < 10; i++) {
+        sc->cid = rand();
+        val = tsearch(sc, &root, compare);
+        if (val == NULL) {
+            log_error("Unable to add node to tree");
+            break;
+        } else if ((*(session_context**)val) != sc) {
+            log_debug("Unable to add node with cid=0x%"PRIx32", try again", sc->cid);
+        } else {
+            break;
+        }
+    }
+
+    if ((val == NULL) || ((*(session_context**)val) != sc)) {
+        log_error("Unable to add node with cid=0x%"PRIx32, sc->cid);
+        free(sc);
+        continue;
+    }
+
+    log_debug("Use session cid=0x%08"PRIx32, sc->cid);
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
+
+    ret = session_init(gc, sc, &client_fd, (unsigned char *)&client_addr, client_addr_size,
+                      first_packet, first_packet_len);
+    if (ret != 0) {
+        log_error("can't init client session");
+        free_session(sc);
+        continue;
+    }
 
     if (session_connected(sc) != 0) {
       log_error("can't init client connection");
-      free(sc);
+      free_session(sc);
       continue;
     }
 
