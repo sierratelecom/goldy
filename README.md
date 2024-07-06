@@ -24,7 +24,7 @@ info (`-g3`).
 ## Help
 
     Usage: goldy [-hvd] [-g log_level] [-t seconds] -l listen_host:port
-                 -b backend_host:port -c cert_pem_file -k private_key_pem_file
+                 -b backend_host:port -c cert_pem_file -k private_key_pem_file [-r root_ca]
 
     Options:
       -h, --help                 this help
@@ -36,6 +36,7 @@ info (`-g3`).
       -b, --backend=ADDR:PORT    proxy UDP traffic to addr and port
       -c, --cert=FILE            TLS certificate PEM filename
       -k, --key=FILE             TLS private key PEM filename
+      -r, --root_ca=FILE         TLS root certificate PEM filename (for verifying client using mutual TLS)
 
 ## Tests
 
