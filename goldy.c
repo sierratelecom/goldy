@@ -443,6 +443,10 @@ static session_context* allocate_session(void)
 
 static void free_session(session_context* sc)
 {
+    mbedtls_net_free(&sc->backend_fd);
+    mbedtls_net_free(&sc->client_fd);
+    mbedtls_ssl_free(&sc->ssl);
+
 #ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
     tdelete(sc, &root, compare);
 #endif
@@ -457,48 +461,49 @@ static int session_init(const global_context *gc,
                         const mbedtls_net_context *client_fd,
                         unsigned char client_ip[39], size_t cliip_len,
                         const unsigned char* first_packet, size_t first_packet_len) {
-  int ret;
+    int ret;
 
-  //memset(sc, 0, sizeof(*sc));
-  memcpy(&sc->client_fd, client_fd, sizeof(sc->client_fd));
-  if (cliip_len > sizeof(sc->client_ip)) {
-    log_error("session_init - client_ip size mismatch");
-    return 1;
-  }
-  memcpy(&sc->client_ip, client_ip, cliip_len);
-  sc->cliip_len = cliip_len;
-  mbedtls_ssl_init(&sc->ssl);
-  mbedtls_net_init(&sc->backend_fd);
-  sc->step = GOLDY_SESSION_STEP_HANDSHAKE;
-  sc->options = gc->options;
+    //memset(sc, 0, sizeof(*sc));
+    memcpy(&sc->client_fd, client_fd, sizeof(sc->client_fd));
+    if (cliip_len > sizeof(sc->client_ip)) {
+        log_error("session_init - client_ip size mismatch");
+        return 1;
+    }
+    memcpy(&sc->client_ip, client_ip, cliip_len);
+    sc->cliip_len = cliip_len;
+    mbedtls_ssl_init(&sc->ssl);
+    mbedtls_net_init(&sc->backend_fd);
+    sc->step = GOLDY_SESSION_STEP_HANDSHAKE;
+    sc->options = gc->options;
 
-  if ((ret = mbedtls_ssl_setup(&sc->ssl, &gc->conf)) != 0) {
-    check_return_code(ret, "session_init - mbedtls_ssl_steup");
-    return 1;
-  }
-  mbedtls_ssl_set_timer_cb(&sc->ssl, &sc->timer,
-                           mbedtls_timing_set_delay,
-                           mbedtls_timing_get_delay);
+    if ((ret = mbedtls_ssl_setup(&sc->ssl, &gc->conf)) != 0) {
+        check_return_code(ret, "session_init - mbedtls_ssl_steup");
+        return 1;
+    }
 
 #ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
-  if( ( ret = mbedtls_ssl_set_cid(&sc->ssl, MBEDTLS_SSL_CID_ENABLED,
-                                  (unsigned char*)&sc->cid, CID_LENGTH ) ) != 0 )
-  {
-      check_return_code(ret, "session_init - mbedtls_ssl_set_cid");
-      return 1;
-  }
+    if ((ret = mbedtls_ssl_set_cid(&sc->ssl, MBEDTLS_SSL_CID_ENABLED,
+                                   (unsigned char*)&sc->cid, CID_LENGTH)) != 0)
+    {
+        check_return_code(ret, "session_init - mbedtls_ssl_set_cid");
+        return 1;
+    }
 #endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
-  /* We already read the first packet of the SSL session from the network in
-   * the initial recvfrom() call on the listening fd. Here we copy the content
-   * of that packet into the SSL incoming data buffer so it'll be consumed on
-   * the next call to mbedtls_ssl_fetch_input(). */
-  if (first_packet_len<MBEDTLS_SSL_IN_BUFFER_LEN) {
-    memcpy(sc->ssl.in_hdr, first_packet, first_packet_len);
-    sc->ssl.in_left = first_packet_len;
-  }
+    mbedtls_ssl_set_timer_cb(&sc->ssl, &sc->timer,
+                             mbedtls_timing_set_delay,
+                             mbedtls_timing_get_delay);
 
-  return 0;
+    /* We already read the first packet of the SSL session from the network in
+     * the initial recvfrom() call on the listening fd. Here we copy the content
+     * of that packet into the SSL incoming data buffer so it'll be consumed on
+     * the next call to mbedtls_ssl_fetch_input(). */
+    if (first_packet_len < MBEDTLS_SSL_IN_BUFFER_LEN) {
+        memcpy(sc->ssl.in_hdr, first_packet, first_packet_len);
+        sc->ssl.in_left = first_packet_len;
+    }
+
+    return 0;
 }
 
 static void session_free(EV_P_ session_context *sc) {
@@ -508,10 +513,6 @@ static void session_free(EV_P_ session_context *sc) {
   ev_io_stop(EV_A_ & sc->client_rd_watcher);
   ev_io_stop(EV_A_ & sc->client_wr_watcher);
   ev_timer_stop(EV_A_ & sc->inactivity_timer);
-
-  mbedtls_net_free(&sc->backend_fd);
-  mbedtls_net_free(&sc->client_fd);
-  mbedtls_ssl_free(&sc->ssl);
 
   LL_PURGE(sc->from_client);
   LL_PURGE(sc->from_backend);
