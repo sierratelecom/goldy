@@ -957,13 +957,16 @@ static session_context *get_session_for_cid(const unsigned char *packet)
 {
     const uint8_t *p;
     session_context sc;
+    session_context **val;
 
     p = &packet[11];
 
     memcpy(&sc.cid, p, CID_LENGTH);
-    log_debug("Find session for cid=0x%08"PRIx32, sc.cid);
+    log_debug("Look for session with cid=%08"PRIx32, sc.cid);
 
-    return tfind(&sc, &root, compare);
+    val = tfind(&sc, &root, compare);
+
+    return (val != NULL) ? *val : NULL;
 }
 #endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
@@ -988,7 +991,7 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
     mbedtls_net_context client_fd;
     session_context *sc = NULL;
 #ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
-    void *val = NULL;
+    session_context **val = NULL;
 #endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
     struct sockaddr_storage client_addr;
     socklen_t client_addr_size = sizeof(client_addr);
@@ -1023,6 +1026,8 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
             log_debug("Received message with CID but it's not found");
             continue;
         }
+
+        log_info("Found session with CID %08"PRIx32, sc->cid);
     }
 #endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
@@ -1063,20 +1068,20 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
         if (val == NULL) {
             log_error("Unable to add node to tree");
             break;
-        } else if ((*(session_context**)val) != sc) {
-            log_debug("Unable to add node with cid=0x%"PRIx32", try again", sc->cid);
+        } else if (*val != sc) {
+            log_debug("Unable to add node with cid=%08"PRIx32", try again", sc->cid);
         } else {
             break;
         }
     }
 
-    if ((val == NULL) || ((*(session_context**)val) != sc)) {
-        log_error("Unable to add node with cid=0x%"PRIx32, sc->cid);
+    if ((val == NULL) || (*val != sc)) {
+        log_error("Unable to add node with cid=%08"PRIx32, sc->cid);
         free(sc);
         continue;
     }
 
-    log_debug("Use session cid=0x%08"PRIx32, sc->cid);
+    log_debug("Use session cid=%08"PRIx32, sc->cid);
 #endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
     ret = session_init(gc, sc, &client_fd, (unsigned char *)&client_addr, client_addr_size,
