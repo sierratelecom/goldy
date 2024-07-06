@@ -6,7 +6,7 @@ endif
 
 all: download_deps build_deps
 
-download_deps: download_libev
+download_deps: download_mbedtls download_libev
 
 .PHONY: download_deps
 

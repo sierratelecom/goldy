@@ -463,7 +463,6 @@ static int session_init(const global_context *gc,
                         const unsigned char* first_packet, size_t first_packet_len) {
     int ret;
 
-    //memset(sc, 0, sizeof(*sc));
     memcpy(&sc->client_fd, client_fd, sizeof(sc->client_fd));
     if (cliip_len > sizeof(sc->client_ip)) {
         log_error("session_init - client_ip size mismatch");
