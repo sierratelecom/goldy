@@ -1091,7 +1091,9 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
         } else {
 #ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
             log_debug("Found session with same CID, use it");
-            //TODO: remove previous fd from ev
+            ev_io_stop(EV_A_ & sc->backend_rd_watcher);
+            ev_io_stop(EV_A_ & sc->backend_wr_watcher);
+            ev_timer_stop(EV_A_ & sc->inactivity_timer);
             mbedtls_net_free(&sc->client_fd);
             memcpy(&sc->client_fd, &client_fd, sizeof(client_fd));
             acquire_peername(sc);
