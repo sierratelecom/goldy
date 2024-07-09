@@ -24,7 +24,7 @@ download_mbedtls:
 .PHONY: download_mbedtls
 
 build_mbedtls:
-	$(MAKE) -C mbedtls-$(MBEDTLS_VER) lib
+	$(MAKE) -C mbedtls-$(MBEDTLS_VER) lib CFLAGS="-DMBEDTLS_SSL_DTLS_CONNECTION_ID -DMBEDTLS_TLS_EXT_CID=54"
 
 download_libev:
 	@echo "Downloading libev-$(LIBEV_VER) ..."

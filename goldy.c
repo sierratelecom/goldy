@@ -31,7 +31,11 @@
 
 #include "ev.h"
 
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
 #include <search.h>
+#else
+#warning "Builing without MBEDTLS_SSL_DTLS_CONNECTION_ID option"
+#endif
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
