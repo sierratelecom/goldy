@@ -460,6 +460,20 @@ static void free_session(session_context* sc)
 
 static void session_dispatch(EV_P_ ev_io *w, int revents);
 
+static void session_set_first_packet(session_context *sc,
+                                     const unsigned char* first_packet,
+                                     size_t first_packet_len)
+{
+    /* We already read the first packet of the SSL session from the network in
+     * the initial recvfrom() call on the listening fd. Here we copy the content
+     * of that packet into the SSL incoming data buffer so it'll be consumed on
+     * the next call to mbedtls_ssl_fetch_input(). */
+    if (first_packet_len < MBEDTLS_SSL_IN_BUFFER_LEN) {
+        memcpy(sc->ssl.in_hdr, first_packet, first_packet_len);
+        sc->ssl.in_left = first_packet_len;
+    }
+}
+
 static int session_init(const global_context *gc,
                         session_context *sc,
                         const mbedtls_net_context *client_fd,
@@ -497,14 +511,7 @@ static int session_init(const global_context *gc,
                              mbedtls_timing_set_delay,
                              mbedtls_timing_get_delay);
 
-    /* We already read the first packet of the SSL session from the network in
-     * the initial recvfrom() call on the listening fd. Here we copy the content
-     * of that packet into the SSL incoming data buffer so it'll be consumed on
-     * the next call to mbedtls_ssl_fetch_input(). */
-    if (first_packet_len < MBEDTLS_SSL_IN_BUFFER_LEN) {
-        memcpy(sc->ssl.in_hdr, first_packet, first_packet_len);
-        sc->ssl.in_left = first_packet_len;
-    }
+    session_set_first_packet(sc, first_packet, first_packet_len);
 
     return 0;
 }
@@ -975,141 +982,138 @@ static session_context *get_session_for_cid(const unsigned char *packet)
 #endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
 static void global_cb(EV_P_ ev_io *w, int revents) {
-  global_context *gc = (global_context *)w->data;
-  static int count = 0;
-  int ret = 0;
-  struct sockaddr_storage local_addr;
-  socklen_t local_addr_size = sizeof(local_addr);
+    global_context *gc = (global_context *)w->data;
+    static int count = 0;
+    int ret = 0;
+    struct sockaddr_storage local_addr;
+    socklen_t local_addr_size = sizeof(local_addr);
 
-  log_debug("global_cb fds: %d,%d revents: 0x%02x count: %d", w->fd, gc->listen_fd.fd, revents, count);
-  count++;
+    log_debug("global_cb fds: %d,%d revents: 0x%02x count: %d", w->fd, gc->listen_fd.fd, revents, count);
+    count++;
 
-  ret = getsockname(gc->listen_fd.fd, (struct sockaddr *)&local_addr, &local_addr_size);
-  if (ret < 0) {
-    log_error("getsockname() failed errno=%d", ret, errno);
-    return;
-  }
-
-  /* Read all the incoming packets waiting on listen_fd, and create a session for each one */
-  for (;;) {
-    mbedtls_net_context client_fd;
-    session_context *sc = NULL;
-#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
-    session_context **val = NULL;
-#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
-    struct sockaddr_storage client_addr;
-    socklen_t client_addr_size = sizeof(client_addr);
-    unsigned char first_packet[MBEDTLS_SSL_MAX_CONTENT_LEN];
-    size_t first_packet_len = 0;
-
-    ret = recvfrom(gc->listen_fd.fd, first_packet, sizeof(first_packet), 0,
-                   (struct sockaddr *)&client_addr, &client_addr_size);
+    ret = getsockname(gc->listen_fd.fd, (struct sockaddr *)&local_addr, &local_addr_size);
     if (ret < 0) {
-      int save_errno = errno;
-      if ((save_errno == EAGAIN) || (save_errno == EWOULDBLOCK)) {
-        /* We finished reading everything that was available so far */
+        log_error("getsockname() failed errno=%d", ret, errno);
         return;
-      }
-      log_error("recvfrom failed on listening socket (fd=%d), errno=%d", gc->listen_fd.fd,
-                save_errno);
-      return;
-    } else if (ret == 0) {
-      log_error("recvfrom() returned 0, this shouldn't happen");
-      continue;
     }
 
-    first_packet_len = ret;
-
+    /* Read all the incoming packets waiting on listen_fd, and create a session for each one */
+    for (;;) {
+        mbedtls_net_context client_fd;
+        session_context *sc = NULL;
 #ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
-    if ((first_packet_len >= (11 + CID_LENGTH)) &&
-        (first_packet[0] == MBEDTLS_SSL_MSG_CID))
-    {
-        sc = get_session_for_cid(first_packet);
-        if (sc == NULL)
-        {
-            log_debug("Received message with CID but it's not found");
+        session_context **val = NULL;
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
+        struct sockaddr_storage client_addr;
+        socklen_t client_addr_size = sizeof(client_addr);
+        unsigned char first_packet[MBEDTLS_SSL_MAX_CONTENT_LEN];
+        size_t first_packet_len = 0;
+
+        ret = recvfrom(gc->listen_fd.fd, first_packet, sizeof(first_packet), 0,
+                       (struct sockaddr *)&client_addr, &client_addr_size);
+        if (ret < 0) {
+            int save_errno = errno;
+            if ((save_errno == EAGAIN) || (save_errno == EWOULDBLOCK)) {
+                /* We finished reading everything that was available so far */
+                return;
+            }
+            log_error("recvfrom failed on listening socket (fd=%d), errno=%d", gc->listen_fd.fd,
+                      save_errno);
+            return;
+        } else if (ret == 0) {
+            log_error("recvfrom() returned 0, this shouldn't happen");
             continue;
         }
 
-        log_info("Found session with CID %08"PRIx32, sc->cid);
-    }
-#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
-
-    /* We have a new client! Connect the client_fd socket to that peer */
-    ret = connect_to_new_client(&client_fd,
-                                &client_addr, client_addr_size,
-                                &local_addr, local_addr_size);
-    if (ret != 0) {
-      log_error("connect_to_new_client failed");
-      continue;
-    }
+        first_packet_len = ret;
 
 #ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
-    if (sc != NULL)
-    {
-        log_debug("Found session with same CID, use it");
-        //TODO: remove previous fd from ev
-        mbedtls_net_free(&sc->client_fd);
-        memcpy(&sc->client_fd, &client_fd, sizeof(client_fd));
-        acquire_peername(sc);
-        log_info("(%s:%d) Client connected from different IP/port", sc->client_ip_str, sc->client_port);
+        if ((first_packet_len >= (11 + CID_LENGTH)) &&
+                (first_packet[0] == MBEDTLS_SSL_MSG_CID))
+        {
+            sc = get_session_for_cid(first_packet);
+            if (sc == NULL)
+            {
+                log_debug("Received message with CID but it's not found");
+                continue;
+            }
 
-        //TODO: notify ev to listen for new socket
-        continue;
-    }
-#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
-
-    sc = allocate_session();
-    if (sc == NULL) {
-        log_error("Unable to allocate session");
-        continue;
-    }
-
-#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
-    for (int i = 0; i < 10; i++) {
-        sc->cid = rand();
-        val = tsearch(sc, &root, compare);
-        if (val == NULL) {
-            log_error("Unable to add node to tree");
-            break;
-        } else if (*val != sc) {
-            log_debug("Unable to add node with cid=%08"PRIx32", try again", sc->cid);
-        } else {
-            break;
+            log_info("Found session with CID %08"PRIx32, sc->cid);
         }
-    }
-
-    if ((val == NULL) || (*val != sc)) {
-        log_error("Unable to add node with cid=%08"PRIx32, sc->cid);
-        free(sc);
-        continue;
-    }
-
-    log_debug("Use session cid=%08"PRIx32, sc->cid);
 #endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
 
-    ret = session_init(gc, sc, &client_fd, (unsigned char *)&client_addr, client_addr_size,
-                      first_packet, first_packet_len);
-    if (ret != 0) {
-        log_error("can't init client session");
-        free_session(sc);
-        continue;
+        /* We have a new client! Connect the client_fd socket to that peer */
+        ret = connect_to_new_client(&client_fd,
+                                    &client_addr, client_addr_size,
+                                    &local_addr, local_addr_size);
+        if (ret != 0) {
+            log_error("connect_to_new_client failed");
+            continue;
+        }
+
+        if (sc == NULL) {
+            sc = allocate_session();
+            if (sc == NULL) {
+                log_error("Unable to allocate session");
+                continue;
+            }
+
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+            for (int i = 0; i < 10; i++) {
+                sc->cid = rand();
+                val = tsearch(sc, &root, compare);
+                if (val == NULL) {
+                    log_error("Unable to add node to tree");
+                    break;
+                } else if (*val != sc) {
+                    log_debug("Unable to add node with cid=%08"PRIx32", try again", sc->cid);
+                } else {
+                    break;
+                }
+            }
+
+            if ((val == NULL) || (*val != sc)) {
+                log_error("Unable to add node with cid=%08"PRIx32, sc->cid);
+                free(sc);
+                continue;
+            }
+
+            log_debug("Use session cid=%08"PRIx32, sc->cid);
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
+
+            ret = session_init(gc, sc, &client_fd, (unsigned char *)&client_addr, client_addr_size,
+                               first_packet, first_packet_len);
+            if (ret != 0) {
+                log_error("can't init client session");
+                free_session(sc);
+                continue;
+            }
+        } else {
+#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+            log_debug("Found session with same CID, use it");
+            //TODO: remove previous fd from ev
+            mbedtls_net_free(&sc->client_fd);
+            memcpy(&sc->client_fd, &client_fd, sizeof(client_fd));
+            acquire_peername(sc);
+            log_info("(%s:%d) Client connected from different IP/port", sc->client_ip_str, sc->client_port);
+            session_set_first_packet(sc, first_packet, first_packet_len);
+#endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
+        }
+
+        if (session_connected(sc) != 0) {
+            log_error("can't init client connection");
+            free_session(sc);
+            continue;
+        }
+
+        /* Start listening for network events on the new client fd */
+        session_start(sc, EV_A);
+        log_debug("global_cb - session_start - client_fd %d", sc->client_fd.fd);
+
+        /* Trigger a simulated EV_READ event to cause the session callback to consume the fisrt
+         * packet (which was already inserted into the SSL buffers in session_init()). */
+        ev_feed_fd_event(EV_A_ sc->client_fd.fd, EV_READ);
     }
-
-    if (session_connected(sc) != 0) {
-      log_error("can't init client connection");
-      free_session(sc);
-      continue;
-    }
-
-    /* Start listening for network events on the new client fd */
-    session_start(sc, EV_A);
-    log_debug("global_cb - session_start - client_fd %d", sc->client_fd.fd);
-
-    /* Trigger a simulated EV_READ event to cause the session callback to consume the fisrt
-     * packet (which was already inserted into the SSL buffers in session_init()). */
-    ev_feed_fd_event(EV_A_ sc->client_fd.fd, EV_READ);
-  }
 }
 
 static int main_loop(global_context *gc) {
