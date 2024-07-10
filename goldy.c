@@ -6,11 +6,7 @@
 #define _XOPEN_SOURCE 700
 #endif
 
-#if !defined(MBEDTLS_CONFIG_FILE)
-#include "mbedtls/config.h"
-#else
-#include MBEDTLS_CONFIG_FILE
-#endif
+#include "mbedtls/build_info.h"
 #include "mbedtls/platform.h"
 
 #include "mbedtls/entropy.h"
@@ -18,7 +14,7 @@
 #include "mbedtls/certs.h"
 #include "mbedtls/x509.h"
 #include "mbedtls/ssl.h"
-#include "mbedtls/ssl_internal.h"
+//#include "mbedtls/ssl_internal.h"
 #include "mbedtls/ssl_cookie.h"
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/error.h"
@@ -313,7 +309,7 @@ static int global_init(const struct instance *gi, global_context *gc) {
     }
     log_debug("Loaded server certificate file");
 
-    ret = mbedtls_pk_parse_keyfile(&gc->pkey, gi->private_key_file, NULL);
+    ret = mbedtls_pk_parse_keyfile(&gc->pkey, gi->private_key_file, NULL, NULL, NULL);
     if (ret != 0) {
         log_error("mbedtls_pk_parse_key returned %d", ret);
         goto exit;
@@ -468,7 +464,7 @@ static void session_set_first_packet(session_context *sc,
      * the initial recvfrom() call on the listening fd. Here we copy the content
      * of that packet into the SSL incoming data buffer so it'll be consumed on
      * the next call to mbedtls_ssl_fetch_input(). */
-    if (first_packet_len < MBEDTLS_SSL_IN_BUFFER_LEN) {
+    if (first_packet_len < MBEDTLS_SSL_IN_CONTENT_LEN) {
         memcpy(sc->ssl.in_hdr, first_packet, first_packet_len);
         sc->ssl.in_left = first_packet_len;
     }
@@ -601,8 +597,8 @@ static void session_report_error(int ret, session_context *sc,
     char error_buf[100];
 
     mbedtls_strerror(ret, error_buf, sizeof(error_buf));
-    log_error("(%s:%d) %s: %s (%d)", sc->client_ip_str, sc->client_port,
-              label, error_buf, ret);
+    log_error("(%s:%d) %s: %s (-0x%04x)", sc->client_ip_str, sc->client_port,
+              label, error_buf, -ret);
 #endif
 }
 
@@ -1006,7 +1002,7 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
 #endif //MBEDTLS_SSL_DTLS_CONNECTION_ID
         struct sockaddr_storage client_addr;
         socklen_t client_addr_size = sizeof(client_addr);
-        unsigned char first_packet[MBEDTLS_SSL_MAX_CONTENT_LEN];
+        unsigned char first_packet[MBEDTLS_SSL_IN_CONTENT_LEN];
         size_t first_packet_len = 0;
 
         ret = recvfrom(gc->listen_fd.fd, first_packet, sizeof(first_packet), 0,
