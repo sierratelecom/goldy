@@ -190,7 +190,7 @@ static int check_return_code(int ret, const char *label) {
         char error_buf[100];
 
         mbedtls_strerror(ret, error_buf, 100);
-        log_error("(%s) Last error was: %d - %s", label, ret, error_buf);
+        log_error("(%s) Last error was: -0x%04x - %s", label, -ret, error_buf);
     }
 #endif
     return ret;
