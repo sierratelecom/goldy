@@ -1,7 +1,7 @@
 #ifndef _GOLDY_H_
 #define _GOLDY_H_
 
-#define GOLDY_VERSION "0.2"
+#define GOLDY_VERSION "0.3"
 #define GOLDY_DAEMON_USER "goldy"
 
 #define DEFAULT_SESSION_TIMEOUT 1000
