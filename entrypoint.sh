@@ -12,6 +12,11 @@ if [ -n "$KEY" ]; then
     GOLDY_ARGS="$GOLDY_ARGS -k key.pem"
 fi
 
+if [ -n "$CA" ]; then
+    echo $CA | base64 -d > ca.pem
+    GOLDY_ARGS="$GOLDY_ARGS -r ca.pem"
+fi
+
 if [ -n "$LISTEN" ]; then
     GOLDY_ARGS="$GOLDY_ARGS -l $LISTEN"
 fi

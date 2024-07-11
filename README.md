@@ -53,11 +53,12 @@ To build the Docker image:
 
 The Docker image has an entrypoint script which makes easy to pass the certificate and key, without requiring the use of a volume. To do so, run:
 
-    docker run -e LISTEN=:::5683 \
+    docker run -e LISTEN=:::5684 \
                -e BACKEND=<backend host:port> \
                -e KEY=<base64> \
                -e CERT=<base64> \
-               -p 5683:5683 \
+               -e CA=<base64> \
+               -p 5684:5684 \
                <extra goldy arguments>
 
 ## License
