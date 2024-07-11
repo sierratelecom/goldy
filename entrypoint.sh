@@ -25,4 +25,12 @@ if [ -n "$BACKEND" ]; then
     GOLDY_ARGS="$GOLDY_ARGS -b $BACKEND"
 fi
 
+if [ -n "$LOG" ]; then
+    GOLDY_ARGS="$GOLDY_ARGS -g $LOG"
+fi
+
+if [ -n "$TIMEOUT" ]; then
+    GOLDY_ARGS="$GOLDY_ARGS -t $TIMEOUT"
+fi
+
 /usr/local/bin/goldy $GOLDY_ARGS -t 1000 $*

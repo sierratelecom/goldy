@@ -58,6 +58,8 @@ The Docker image has an entrypoint script which makes easy to pass the certifica
                -e KEY=<base64> \
                -e CERT=<base64> \
                -e CA=<base64> \
+               -e LOG=DEBUG/INFO/ERROR \
+               -e TIMEOUT=<timeout> \
                -p 5684:5684/udp \
                goldy:latest
 
