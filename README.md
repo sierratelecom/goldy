@@ -58,8 +58,8 @@ The Docker image has an entrypoint script which makes easy to pass the certifica
                -e KEY=<base64> \
                -e CERT=<base64> \
                -e CA=<base64> \
-               -p 5684:5684 \
-               <extra goldy arguments>
+               -p 5684:5684/udp \
+               goldy:latest
 
 ## License
 

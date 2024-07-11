@@ -6,7 +6,7 @@ WORKDIR /src
 
 ADD . /src
 
-RUN make deps && make
+RUN make deps -j $(nproc) && make -j $(nproc)
 
 FROM alpine:3.16
 
