@@ -6,9 +6,7 @@
 #define _XOPEN_SOURCE 700
 #endif
 
-#include "mbedtls/build_info.h"
 #include "mbedtls/platform.h"
-
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/x509.h"
@@ -307,7 +305,11 @@ static int global_init(const struct instance *gi, global_context *gc) {
     }
     log_debug("Loaded server certificate file");
 
+#if (MBEDTLS_VERSION_MAJOR >= 3)
     ret = mbedtls_pk_parse_keyfile(&gc->pkey, gi->private_key_file, NULL, NULL, NULL);
+#else
+    ret = mbedtls_pk_parse_keyfile(&gc->pkey, gi->private_key_file, NULL);
+#endif
     if (ret != 0) {
         log_error("mbedtls_pk_parse_key returned %d", ret);
         goto exit;
