@@ -1,5 +1,7 @@
 include deps/versions.mk
 
+GOLDY_VERSION = $(shell git describe --tags --dirty)
+
 MBEDTLS_DIR ?= deps/mbedtls-$(MBEDTLS_VER)
 MBEDTLS_INC_DIR ?= $(MBEDTLS_DIR)/include
 MBEDTLS_LIB_DIR ?= $(MBEDTLS_DIR)/library
@@ -21,6 +23,7 @@ ifdef DEBUG
 LOCAL_CFLAGS += -g3
 endif
 LOCAL_CFLAGS += -DMBEDTLS_ALLOW_PRIVATE_ACCESS
+LOCAL_CFLAGS += -DGOLDY_VERSION=\"$(GOLDY_VERSION)\"
 
 COMPILE=$(QUIET_CC) $(CC) $(LOCAL_CFLAGS) $(CFLAGS)
 LINK=$(QUIET_LINK) $(CC)

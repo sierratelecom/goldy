@@ -1,6 +1,6 @@
 FROM alpine:3.16 as builder
 
-RUN apk add --update build-base curl
+RUN apk add --update build-base curl git
 
 WORKDIR /src
 
