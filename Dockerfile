@@ -1,14 +1,16 @@
-FROM alpine:3.16 as builder
+FROM alpine:3.20 as builder
 
-RUN apk add --update build-base curl git
+RUN apk add --update build-base mbedtls-dev libev-dev git
 
 WORKDIR /src
 
 ADD . /src
 
-RUN make deps -j $(nproc) && make -j $(nproc)
+RUN make -j $(nproc)
 
-FROM alpine:3.16
+FROM alpine:3.20
+
+RUN apk add --update mbedtls libev
 
 COPY --from=builder /src/goldy /usr/local/bin/
 
