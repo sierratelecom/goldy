@@ -1,4 +1,6 @@
 
+GOLDY_VERSION = $(shell git describe --tags --dirty)
+
 CFLAGS ?= -g
 WARNING_CFLAGS ?= -Wall -W -Wdeclaration-after-statement
 LDFLAGS ?=
@@ -15,6 +17,7 @@ ifdef DEBUG
 LOCAL_CFLAGS += -g3
 endif
 LOCAL_CFLAGS += -DMBEDTLS_ALLOW_PRIVATE_ACCESS
+LOCAL_CFLAGS += -DGOLDY_VERSION=\"$(GOLDY_VERSION)\"
 
 COMPILE=$(QUIET_CC) $(CC) $(LOCAL_CFLAGS) $(CFLAGS)
 LINK=$(QUIET_LINK) $(CC)

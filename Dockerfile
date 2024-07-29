@@ -1,6 +1,6 @@
 FROM alpine:3.20 as builder
 
-RUN apk add --update build-base mbedtls-dev libev-dev
+RUN apk add --update build-base mbedtls-dev libev-dev git
 
 WORKDIR /src
 
